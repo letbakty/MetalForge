@@ -66,6 +66,15 @@ Recycles intermediate `MTLTexture`s keyed by descriptor so the per-frame path
 avoids repeated allocation. Textures are returned explicitly via
 `recycle(_:)` / `recycleHandler`.
 
+### Effect presets
+
+`MetalForgeEffectPreset` packages curated filter chains (e.g. `.vhs`, `.noir`,
+`.cyberpunk`) built from the stock filters — colour, analog, temporal, and the
+GPU shader effects (blur, sharpen, vignette, scanlines, RGB split).
+`MetalForgePipeline.applyPreset(_:)` builds the preset's chain and **replaces**
+the pipeline's current filters. It is a convenience layer over `append` /
+`removeAllFilters`, not a separate processing path.
+
 ### Preview and recording
 
 `MetalForgeView` is an `MTKView` subclass that presents a processed texture;
