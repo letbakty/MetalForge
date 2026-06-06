@@ -5,35 +5,45 @@ import CoreMedia
 @preconcurrency import Metal
 import MetalForge
 
-// MARK: - Filter choices exposed to the UI
+// MARK: - Preset choices exposed to the UI
 
-/// The set of demo filters the example app exposes.
+/// The set of looks the example app offers in its picker.
 ///
-/// All filters live in the `MetalForgePipeline` simultaneously; switching the
-/// active choice just re-targets the inactive ones to their no-op state. This
-/// is the same race-free pattern used by `MetalForgeDemoController` in the
-/// library, scaled down to four demo entries.
-enum FilterChoice: String, CaseIterable, Identifiable, Sendable {
-    case original     = "Original"
-    case warm         = "Warm"
-    case cool         = "Cool"
-    case highContrast = "High Contrast"
+/// `original` is the no-effect state — an empty pipeline that renders the raw
+/// camera signal. It is intentionally **not** a member of
+/// `MetalForgeEffectPreset`; the library models "no preset" as the absence of a
+/// preset, so the demo wraps the library enum in this UI-only type to add the
+/// `original` entry.
+enum PresetChoice: Hashable, Identifiable, Sendable {
+    case original
+    case preset(MetalForgeEffectPreset)
 
-    var id: String { rawValue }
+    /// Original first, followed by every library preset in declaration order.
+    static var allCases: [PresetChoice] {
+        [.original] + MetalForgeEffectPreset.allCases.map(PresetChoice.preset)
+    }
 
-    /// SF Symbol used in the segmented picker.
-    var iconName: String {
+    var id: String {
         switch self {
-        case .original:     return "circle"
-        case .warm:         return "sun.max.fill"
-        case .cool:         return "snowflake"
-        case .highContrast: return "circle.righthalf.filled"
+        case .original:          return "original"
+        case .preset(let preset): return preset.rawValue
         }
     }
 
-    /// Whether the intensity slider has any effect on this choice.
-    var supportsIntensity: Bool {
-        self != .original
+    /// Label shown in the picker.
+    var displayName: String {
+        switch self {
+        case .original:           return "Original"
+        case .preset(let preset): return preset.displayName
+        }
+    }
+
+    /// The wrapped library preset, or `nil` for `original`.
+    var preset: MetalForgeEffectPreset? {
+        switch self {
+        case .original:           return nil
+        case .preset(let preset): return preset
+        }
     }
 }
 
@@ -56,21 +66,15 @@ final class CameraViewModel: ObservableObject {
     @Published var permissionsGranted = false
     @Published var setupError: String?
 
-    /// Currently selected demo filter.
-    @Published var activeFilter: FilterChoice = .original {
-        didSet { applyActiveFilter() }
+    /// Currently selected preset (or `.original` for the raw camera signal).
+    @Published var activePreset: PresetChoice = .original {
+        didSet { applyActivePreset() }
     }
 
-    /// Effect strength in `[0, 1]`. Mapped to each filter's own natural range
-    /// inside `applyActiveFilter()`.
-    @Published var filterIntensity: Float = 1.0 {
-        didSet { applyActiveFilter() }
-    }
-
-    /// When `true`, the entire processed look is bypassed and the pipeline
-    /// renders the raw camera signal (all filters set to identity).
+    /// When `true`, the selected preset is bypassed and the pipeline renders the
+    /// raw camera signal (empty filter chain).
     @Published var showOriginal: Bool = false {
-        didSet { applyActiveFilter() }
+        didSet { applyActivePreset() }
     }
 
     /// Frames per second over a rolling 1-second window. Updated on the main
@@ -87,10 +91,22 @@ final class CameraViewModel: ObservableObject {
     private let pipeline: MetalForgePipeline
     private let capture: MetalForgeCaptureManager
 
-    // Permanent filter chain — see the `MetalForgeDemoController` pattern.
-    private let warmLUT:         MetalForgeLUTFilter
-    private let coolLUT:         MetalForgeLUTFilter
-    private let colorCorrection: ColorCorrectionFilter
+    /// Serialises access to the pipeline's filter chain. `applyPreset` rebuilds
+    /// the chain (a mutation of the filter array) while frames are processed on
+    /// the capture queue — both sides take this lock so the swap never races a
+    /// `process(_:)` call.
+    ///
+    /// Trade-off (acceptable for a demo): the lock is held across a whole
+    /// `process(_:)` call — which blocks on the GPU via `waitUntilCompleted` —
+    /// so a preset switch waits at most one frame, and conversely a switch that
+    /// compiles new shader pipelines can briefly stall the capture thread. A
+    /// production app would build the new chain off-thread and swap only an
+    /// atomic reference.
+    ///
+    /// No deadlock risk: this is a plain, non-recursive `NSLock` acquired in
+    /// exactly two places (`handleVideoFrame` and `applyActivePreset`), never
+    /// nested and never held across an `await`.
+    private let pipelineLock = NSLock()
 
     // MARK: FPS bookkeeping
 
@@ -107,23 +123,14 @@ final class CameraViewModel: ObservableObject {
             self.engine = engine
             self.view = try MetalForgeView(engine: engine)
             self.pipeline = try MetalForgePipeline(engine: engine)
-
-            self.warmLUT = try MetalForgeLUTFilter(engine: engine, preset: .warm, size: 32)
-            self.coolLUT = try MetalForgeLUTFilter(engine: engine, preset: .cool, size: 32)
-            self.colorCorrection = try ColorCorrectionFilter(engine: engine)
         } catch {
             fatalError("MetalForge initialisation failed: \(error)")
         }
 
         self.capture = MetalForgeCaptureManager()
 
-        // All three filters live permanently in the chain. We just rewrite
-        // their parameters between frames depending on `activeFilter`.
-        pipeline.append(warmLUT)
-        pipeline.append(coolLUT)
-        pipeline.append(colorCorrection)
-
-        applyActiveFilter()
+        // Start on the raw camera signal (empty chain).
+        applyActivePreset()
 
         // Recycle each presented texture back into the pool after the GPU
         // finishes the draw. Capturing `pipeline` weakly avoids any retain
@@ -167,8 +174,12 @@ final class CameraViewModel: ObservableObject {
     /// Called on `MetalForgeCaptureManager`'s background capture queue.
     nonisolated private func handleVideoFrame(_ pixelBuffer: CVPixelBuffer) {
         // The pipeline drives its own GPU sync internally; we can call it
-        // straight from the capture queue.
-        guard let texture = pipeline.process(pixelBuffer: pixelBuffer) else { return }
+        // straight from the capture queue. The lock guards against a concurrent
+        // preset swap rebuilding the filter chain mid-frame.
+        pipelineLock.lock()
+        let texture = pipeline.process(pixelBuffer: pixelBuffer)
+        pipelineLock.unlock()
+        guard let texture else { return }
 
         // Hop to the main actor to present + bump FPS. The actor isolation
         // means the view's `present(texture:)` call is safe.
@@ -194,40 +205,29 @@ final class CameraViewModel: ObservableObject {
         }
     }
 
-    // MARK: Filter routing
+    // MARK: Preset routing
 
-    /// Configure every filter in the pipeline for the current `activeFilter`
-    /// + `filterIntensity`. Inactive filters are pinned to their identity
-    /// state so they encode but make no visible change.
-    private func applyActiveFilter() {
-        // Identity defaults for everything.
-        warmLUT.intensity = 0
-        coolLUT.intensity = 0
-        colorCorrection.exposure = 0
-        colorCorrection.contrast = 1
-        colorCorrection.saturation = 1
-        colorCorrection.temperatureShift = 0
+    /// Rebuild the pipeline's filter chain for the current `activePreset`.
+    ///
+    /// `showOriginal` (or selecting `.original`) clears the chain to render the
+    /// raw camera signal. Otherwise the library's `applyPreset(_:)` swaps in the
+    /// preset's curated filter chain. The swap is serialised against frame
+    /// processing via `pipelineLock`.
+    private func applyActivePreset() {
+        pipelineLock.lock()
+        defer { pipelineLock.unlock() }
 
-        guard !showOriginal else { return }
+        guard !showOriginal, let preset = activePreset.preset else {
+            pipeline.removeAllFilters()
+            return
+        }
 
-        switch activeFilter {
-        case .original:
-            // Everything stays at identity — pure camera signal.
-            break
-
-        case .warm:
-            warmLUT.intensity = filterIntensity
-
-        case .cool:
-            coolLUT.intensity = filterIntensity
-
-        case .highContrast:
-            // Map slider [0, 1] to a perceptually useful contrast range.
-            // 1.0 = identity (slider 0), 2.0 = strong punch (slider 1).
-            colorCorrection.contrast = 1.0 + filterIntensity
-            // Slight saturation bump rides along with contrast for a more
-            // cinematic look. Pure contrast on its own often feels flat.
-            colorCorrection.saturation = 1.0 + 0.25 * filterIntensity
+        do {
+            try pipeline.applyPreset(preset)
+        } catch {
+            // Fall back to the raw signal if a preset fails to build.
+            pipeline.removeAllFilters()
+            setupError = "Failed to apply preset \(preset.displayName): \(error.localizedDescription)"
         }
     }
 }

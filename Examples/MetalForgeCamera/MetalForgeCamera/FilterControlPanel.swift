@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Bottom control panel: filter picker + intensity slider + before/after toggle.
+/// Bottom control panel: preset picker + before/after toggle.
 ///
 /// Pure-UI; all state is bound to `CameraViewModel`.
 struct FilterControlPanel: View {
@@ -9,39 +9,22 @@ struct FilterControlPanel: View {
 
     var body: some View {
         VStack(spacing: 16) {
-            // ----- Filter picker -----
-            Picker("Filter", selection: $viewModel.activeFilter) {
-                ForEach(FilterChoice.allCases) { choice in
-                    Label(choice.rawValue, systemImage: choice.iconName)
-                        .tag(choice)
+            // ----- Preset picker -----
+            HStack {
+                Image(systemName: "wand.and.stars")
+                Text("Preset")
+                    .font(.subheadline)
+                Spacer()
+                Picker("Preset", selection: $viewModel.activePreset) {
+                    ForEach(PresetChoice.allCases) { choice in
+                        Text(choice.displayName).tag(choice)
+                    }
                 }
+                .pickerStyle(.menu)
+                .tint(.white)
+                .disabled(viewModel.showOriginal)
             }
-            .pickerStyle(.segmented)
-            .disabled(viewModel.showOriginal)
-
-            // ----- Intensity slider -----
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Image(systemName: "dial.medium")
-                        .imageScale(.small)
-                    Text("Intensity")
-                        .font(.caption)
-                    Spacer()
-                    Text("\(Int(viewModel.filterIntensity * 100))%")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.white.opacity(0.7))
-                }
-                .foregroundStyle(.white)
-
-                Slider(value: $viewModel.filterIntensity, in: 0...1)
-                    .tint(.white)
-                    // The "Original" choice has nothing to dial, so the slider
-                    // is visually present (per spec) but inert.
-                    .disabled(
-                        viewModel.showOriginal ||
-                        !viewModel.activeFilter.supportsIntensity
-                    )
-            }
+            .foregroundStyle(.white)
 
             // ----- Before / After toggle -----
             HStack {
