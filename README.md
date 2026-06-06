@@ -41,7 +41,7 @@ plumbing yourself.
 
 ## Demo
 
-> A demo video is not yet available. In the meantime, run the
+> Demo screenshots and videos will be added soon. In the meantime, run the
 > [example camera app](#running-the-example-app) on a device to see MetalForge live.
 
 The bundled [`MetalForgeCamera`](Examples/MetalForgeCamera) example app shows the
@@ -89,15 +89,6 @@ Add MetalForge as a Swift Package dependency:
 ```
 
 Then add `"MetalForge"` to your target's dependencies.
-
-> **Until `v0.1.0` is tagged**, track the `develop` branch instead:
->
-> ```swift
-> .package(
->     url: "https://github.com/letbakty/MetalForge.git",
->     branch: "develop"
-> )
-> ```
 
 ---
 
