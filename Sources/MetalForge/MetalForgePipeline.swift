@@ -38,7 +38,11 @@ import Foundation
 /// `CheckedContinuation`.
 public final class MetalForgePipeline: @unchecked Sendable {
 
-    private let engine: MetalForgeEngine
+    /// The Metal context backing this pipeline.
+    ///
+    /// Exposed read-only so callers (e.g. `applyPreset(_:)`) can construct
+    /// filters that need the same device, command queue, and shader libraries.
+    public let engine: MetalForgeEngine
     private let pool: TexturePool
     private let yuvConverter: YUVToRGBConverter
     private let hdrDecode: HDRDecodeFilter
@@ -66,6 +70,10 @@ public final class MetalForgePipeline: @unchecked Sendable {
     public func removeAllFilters() {
         filters.removeAll()
     }
+
+    /// Number of filters currently in the chain. Internal — used by tests and
+    /// preset helpers to observe chain state without exposing the filter array.
+    var filterCount: Int { filters.count }
 
     // MARK: - Processing
 
