@@ -41,6 +41,19 @@ A file-by-file guide to the repository, grouped by area. See
   `ChromaticAberrationFilter`, `AnalogNoiseFilter`, `HorizontalJitterFilter`.
 - `Sources/MetalForge/TemporalEffectsFilters.swift` — `MotionBlurFilter`,
   `NeonTrailsFilter`.
+- `Sources/MetalForge/BlurFilters.swift` — `GaussianBlurFilter` (separable,
+  two-pass), `SharpenFilter`.
+- `Sources/MetalForge/StylizationFilters.swift` — `VignetteFilter`,
+  `ScanlineFilter`, `RGBSplitFilter`.
+
+## Effect presets
+
+- `Sources/MetalForge/MetalForgeEffectPreset.swift` — `MetalForgeEffectPreset`
+  enum (nine curated looks) with `displayName`, `description`, and
+  `makeFilters(engine:)`.
+- `Sources/MetalForge/MetalForgePipeline+Presets.swift` —
+  `MetalForgePipeline.applyPreset(_:)`, which replaces the current filter chain
+  with a preset's chain.
 
 ## Shaders
 
@@ -56,6 +69,8 @@ compiled at runtime under SwiftPM):
 - `GlitchShader.metal` — glitch effect.
 - `AnalogKernels.metal` — chromatic aberration, noise, jitter.
 - `TemporalKernels.metal` — motion blur, neon trails.
+- `BlurKernels.metal` — separable Gaussian blur passes and sharpen.
+- `StylizationKernels.metal` — vignette, scanlines, RGB split.
 
 ## Capture
 
@@ -81,7 +96,10 @@ compiled at runtime under SwiftPM):
 
 ## Tests
 
-- `Tests/MetalForgeTests/MetalForgeTests.swift` — build and unit tests.
+- `Tests/MetalForgeTests/MetalForgeTests.swift` — build, unit, preset, and
+  GPU pixel-behavior tests.
+- `Tests/MetalForgeTests/MetalForgePixelTestHelpers.swift` — helpers for
+  pixel-behavior tests: known-data textures, GPU readback, tolerance compares.
 
 ## Example app
 
@@ -99,5 +117,6 @@ compiled at runtime under SwiftPM):
 
 ## CI
 
-- `.github/workflows/ci.yml` — runs `swift build` and `swift test` on push and
-  pull requests targeting `main` and `develop`.
+- `.github/workflows/ci.yml` — on push and pull requests targeting `main` and
+  `develop`: builds and tests the Swift package, and builds the example app via
+  `xcodebuild`.
