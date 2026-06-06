@@ -335,6 +335,401 @@ final class MetalForgeEngineTests: XCTestCase {
         }
     }
 
+    // MARK: - GPU effects pack (blur + stylization)
+
+    /// Allocate a private, writable test texture and run a filter end-to-end on
+    /// it, returning whether a non-nil destination survived a committed GPU pass.
+    private func runFilterOnTestTexture(
+        _ filter: any MetalForgeFilter,
+        engine: MetalForgeEngine,
+        pixelFormat: MTLPixelFormat = .bgra8Unorm,
+        size: Int = 64
+    ) -> Bool {
+        let desc = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: pixelFormat, width: size, height: size, mipmapped: false
+        )
+        desc.storageMode = .private
+        desc.usage = [.shaderRead, .shaderWrite]
+
+        guard
+            let source = engine.device.makeTexture(descriptor: desc),
+            let destination = engine.device.makeTexture(descriptor: desc),
+            let commandBuffer = engine.commandQueue.makeCommandBuffer()
+        else { return false }
+
+        filter.encode(source: source, destination: destination, commandBuffer: commandBuffer)
+        commandBuffer.commit()
+        commandBuffer.waitUntilCompleted()
+        return commandBuffer.status == .completed
+    }
+
+    func testGaussianBlurFilterIsConstructible() throws {
+        guard let engine else { throw XCTSkip("No Metal device.") }
+        XCTAssertNoThrow(try GaussianBlurFilter(engine: engine))
+    }
+
+    func testSharpenFilterIsConstructible() throws {
+        guard let engine else { throw XCTSkip("No Metal device.") }
+        XCTAssertNoThrow(try SharpenFilter(engine: engine))
+    }
+
+    func testVignetteFilterIsConstructible() throws {
+        guard let engine else { throw XCTSkip("No Metal device.") }
+        XCTAssertNoThrow(try VignetteFilter(engine: engine))
+    }
+
+    func testScanlineFilterIsConstructible() throws {
+        guard let engine else { throw XCTSkip("No Metal device.") }
+        XCTAssertNoThrow(try ScanlineFilter(engine: engine))
+    }
+
+    func testRGBSplitFilterIsConstructible() throws {
+        guard let engine else { throw XCTSkip("No Metal device.") }
+        XCTAssertNoThrow(try RGBSplitFilter(engine: engine))
+    }
+
+    func testGaussianBlurProcessesTestTexture() throws {
+        guard let engine else { throw XCTSkip("No Metal device.") }
+        let filter = try GaussianBlurFilter(engine: engine)
+        filter.radius = 6
+        XCTAssertTrue(runFilterOnTestTexture(filter, engine: engine))
+        // Second pass exercises intermediate-texture reuse (no realloc).
+        XCTAssertTrue(runFilterOnTestTexture(filter, engine: engine))
+    }
+
+    func testSharpenProcessesTestTexture() throws {
+        guard let engine else { throw XCTSkip("No Metal device.") }
+        let filter = try SharpenFilter(engine: engine)
+        filter.amount = 1.0
+        XCTAssertTrue(runFilterOnTestTexture(filter, engine: engine))
+    }
+
+    func testVignetteProcessesTestTexture() throws {
+        guard let engine else { throw XCTSkip("No Metal device.") }
+        XCTAssertTrue(runFilterOnTestTexture(try VignetteFilter(engine: engine), engine: engine))
+    }
+
+    func testScanlineProcessesTestTexture() throws {
+        guard let engine else { throw XCTSkip("No Metal device.") }
+        XCTAssertTrue(runFilterOnTestTexture(try ScanlineFilter(engine: engine), engine: engine))
+    }
+
+    func testRGBSplitProcessesTestTexture() throws {
+        guard let engine else { throw XCTSkip("No Metal device.") }
+        XCTAssertTrue(runFilterOnTestTexture(try RGBSplitFilter(engine: engine), engine: engine))
+    }
+
+    func testGPUEffectsProcessHDRTexture() throws {
+        guard let engine else { throw XCTSkip("No Metal device.") }
+        // Exercise the HDR-specialised PSO variants on an .rgba16Float target.
+        let filters: [any MetalForgeFilter] = [
+            try GaussianBlurFilter(engine: engine),
+            try SharpenFilter(engine: engine),
+            try VignetteFilter(engine: engine),
+            try ScanlineFilter(engine: engine),
+            try RGBSplitFilter(engine: engine)
+        ]
+        for filter in filters {
+            XCTAssertTrue(
+                runFilterOnTestTexture(filter, engine: engine, pixelFormat: .rgba16Float),
+                "\(type(of: filter)) should process an HDR texture"
+            )
+        }
+    }
+
+    // MARK: - GPU effects pack (pixel behavior)
+
+    func testVignetteDarkensCornersNotCentre() throws {
+        guard let engine else { throw XCTSkip("No Metal device.") }
+        let size = 16
+        guard let source = PixelTest.solidColor(
+            device: engine.device, size: size, rgba: SIMD4(0.5, 0.5, 0.5, 1)
+        ) else { throw XCTSkip("Texture allocation failed.") }
+
+        let filter = try VignetteFilter(engine: engine)
+        filter.intensity = 0.7
+        filter.radius    = 0.4
+        filter.softness   = 0.4
+
+        guard let dest = PixelTest.run(filter, source: source,
+                                       device: engine.device, queue: engine.commandQueue)
+        else { throw XCTSkip("GPU run failed.") }
+        let out = PixelTest.readBytes(dest)
+
+        let centre = PixelTest.color(out, x: size / 2, y: size / 2, width: size)
+        let corner = PixelTest.color(out, x: 0,        y: 0,        width: size)
+
+        // Centre stays roughly the original mid-grey.
+        XCTAssertEqual(PixelTest.luma(centre), 0.5, accuracy: 0.08)
+        // Corner is darker than the centre, and darker than the original.
+        XCTAssertLessThan(PixelTest.luma(corner), PixelTest.luma(centre) - 0.05)
+        XCTAssertLessThan(PixelTest.luma(corner), 0.45)
+    }
+
+    func testScanlineProducesPerRowBrightnessVariation() throws {
+        guard let engine else { throw XCTSkip("No Metal device.") }
+        let size = 16
+        let base: Float = 0.6
+        guard let source = PixelTest.solidColor(
+            device: engine.device, size: size, rgba: SIMD4(base, base, base, 1)
+        ) else { throw XCTSkip("Texture allocation failed.") }
+
+        let filter = try ScanlineFilter(engine: engine)
+        filter.intensity = 0.6
+        filter.lineWidth = 2.0
+        filter.timeSeed  = 0.0
+
+        guard let dest = PixelTest.run(filter, source: source,
+                                       device: engine.device, queue: engine.commandQueue)
+        else { throw XCTSkip("GPU run failed.") }
+        let out = PixelTest.readBytes(dest)
+
+        // Sample the brightness of column 0 across every row.
+        let rowLuma = (0..<size).map { y in
+            PixelTest.luma(PixelTest.color(out, x: 0, y: y, width: size))
+        }
+        let minL = rowLuma.min()!
+        let maxL = rowLuma.max()!
+
+        // Rows must differ from each other (scanline banding)…
+        XCTAssertGreaterThan(maxL - minL, 0.05, "rows should vary in brightness")
+        // …and at least one row must be darker than the original signal.
+        XCTAssertLessThan(minL, base - 0.05, "some row should be darker than the input")
+    }
+
+    func testRGBSplitShiftsChannelsDifferently() throws {
+        guard let engine else { throw XCTSkip("No Metal device.") }
+        let size = 16
+        // Left half red, right half blue — a colour boundary the split can smear.
+        guard let source = PixelTest.rgbZones(device: engine.device, size: size)
+        else { throw XCTSkip("Texture allocation failed.") }
+
+        let filter = try RGBSplitFilter(engine: engine)
+        filter.redOffset   = SIMD2(0.18, 0.0)   // R sampled well to the right
+        filter.greenOffset = SIMD2(0.0, 0.0)
+        filter.blueOffset  = SIMD2(-0.18, 0.0)  // B sampled well to the left
+        filter.intensity   = 1.0
+
+        guard let dest = PixelTest.run(filter, source: source,
+                                       device: engine.device, queue: engine.commandQueue)
+        else { throw XCTSkip("GPU run failed.") }
+        let out = PixelTest.readBytes(dest)
+        let inp = PixelTest.readBytes(source)
+
+        // Near the boundary the three channels are pulled from different zones,
+        // so the per-channel result diverges and the output differs from input.
+        let bx = size / 2
+        let by = size / 2
+        let o = PixelTest.color(out, x: bx, y: by, width: size)
+        let i = PixelTest.color(inp, x: bx, y: by, width: size)
+
+        // R is pulled from one zone, B from the other, so the two channels
+        // change by different amounts relative to the input.
+        let dR = abs(o.x - i.x)
+        let dG = abs(o.y - i.y)
+        let dB = abs(o.z - i.z)
+        XCTAssertGreaterThan(abs(dR - dB), 0.1, "R and B channels should change by different amounts")
+        XCTAssertGreaterThan(dR + dG + dB, 0.1, "output should differ from input near the boundary")
+    }
+
+    func testGaussianBlurSpreadsCentrePixel() throws {
+        guard let engine else { throw XCTSkip("No Metal device.") }
+        let size = 16
+        guard let source = PixelTest.centerBright(device: engine.device, size: size)
+        else { throw XCTSkip("Texture allocation failed.") }
+
+        let filter = try GaussianBlurFilter(engine: engine)
+        filter.radius    = 3.0
+        filter.intensity = 1.0   // fully blurred
+
+        guard let dest = PixelTest.run(filter, source: source,
+                                       device: engine.device, queue: engine.commandQueue)
+        else { throw XCTSkip("GPU run failed.") }
+        let out = PixelTest.readBytes(dest)
+
+        let c  = size / 2
+        let centre   = PixelTest.luma(PixelTest.color(out, x: c,     y: c, width: size))
+        let near     = PixelTest.luma(PixelTest.color(out, x: c + 1, y: c, width: size))
+        let far      = PixelTest.luma(PixelTest.color(out, x: c + 5, y: c, width: size))
+
+        // The lone white centre spreads out: centre dims below 1, the neighbour
+        // lights up above 0, and energy falls off with distance.
+        XCTAssertLessThan(centre, 0.95, "centre should darken as it spreads")
+        XCTAssertGreaterThan(near, 0.01, "the neighbour should brighten above zero")
+        XCTAssertGreaterThan(near, far, "near pixels should be brighter than far pixels")
+    }
+
+    func testSharpenChangesPixelsNearEdge() throws {
+        guard let engine else { throw XCTSkip("No Metal device.") }
+        let size = 16
+        guard let source = PixelTest.verticalEdge(
+            device: engine.device, size: size,
+            dark: SIMD4(0.2, 0.2, 0.2, 1), bright: SIMD4(0.8, 0.8, 0.8, 1)
+        ) else { throw XCTSkip("Texture allocation failed.") }
+
+        let filter = try SharpenFilter(engine: engine)
+        filter.amount = 1.0
+
+        guard let dest = PixelTest.run(filter, source: source,
+                                       device: engine.device, queue: engine.commandQueue)
+        else { throw XCTSkip("GPU run failed.") }
+        let out = PixelTest.readBytes(dest)
+        let inp = PixelTest.readBytes(source)
+
+        // Look at the columns straddling the boundary (x = size/2-1 and size/2)
+        // on a middle row; unsharp masking should over/undershoot there.
+        let y = size / 2
+        var maxDelta: Float = 0
+        for x in [size / 2 - 1, size / 2] {
+            let o = PixelTest.luma(PixelTest.color(out, x: x, y: y, width: size))
+            let i = PixelTest.luma(PixelTest.color(inp, x: x, y: y, width: size))
+            maxDelta = max(maxDelta, abs(o - i))
+        }
+        XCTAssertGreaterThan(maxDelta, 0.03, "sharpen should change pixels near the edge")
+    }
+
+    func testVignetteHDRDarkensCorners() throws {
+        guard let engine else { throw XCTSkip("No Metal device.") }
+        let size = 16
+        guard let source = PixelTest.makeTexture(
+            device: engine.device, width: size, height: size, pixelFormat: .rgba16Float
+        ) else { throw XCTSkip("Texture allocation failed.") }
+        PixelTest.fillHDR(source) { _, _ in SIMD4(0.5, 0.5, 0.5, 1) }
+
+        let filter = try VignetteFilter(engine: engine)
+        filter.intensity = 0.7
+        filter.radius    = 0.4
+        filter.softness   = 0.4
+
+        guard let dest = PixelTest.run(filter, source: source,
+                                       device: engine.device, queue: engine.commandQueue)
+        else { throw XCTSkip("GPU run failed.") }
+
+        let centre = PixelTest.colorHDR(dest, x: size / 2, y: size / 2)
+        let corner = PixelTest.colorHDR(dest, x: 0,        y: 0)
+        XCTAssertEqual(PixelTest.luma(centre), 0.5, accuracy: 0.08)
+        XCTAssertLessThan(PixelTest.luma(corner), PixelTest.luma(centre) - 0.05)
+    }
+
+    // MARK: - Effect presets
+
+    func testPresetAllCasesIsNotEmpty() {
+        XCTAssertFalse(MetalForgeEffectPreset.allCases.isEmpty)
+    }
+
+    func testEveryPresetHasNonEmptyDisplayName() {
+        for preset in MetalForgeEffectPreset.allCases {
+            XCTAssertFalse(
+                preset.displayName.isEmpty,
+                "\(preset) should have a non-empty displayName"
+            )
+        }
+    }
+
+    func testEveryPresetHasNonEmptyDescription() {
+        for preset in MetalForgeEffectPreset.allCases {
+            XCTAssertFalse(
+                preset.description.isEmpty,
+                "\(preset) should have a non-empty description"
+            )
+        }
+    }
+
+    func testMakeFiltersDoesNotThrowForEveryPreset() throws {
+        guard let engine else { throw XCTSkip("No Metal device.") }
+        for preset in MetalForgeEffectPreset.allCases {
+            XCTAssertNoThrow(
+                try preset.makeFilters(engine: engine),
+                "makeFilters should not throw for \(preset)"
+            )
+        }
+    }
+
+    func testMakeFiltersReturnsNonEmptyChainForEveryPreset() throws {
+        guard let engine else { throw XCTSkip("No Metal device.") }
+        for preset in MetalForgeEffectPreset.allCases {
+            let filters = try preset.makeFilters(engine: engine)
+            XCTAssertFalse(filters.isEmpty, "\(preset) should produce at least one filter")
+        }
+    }
+
+    func testApplyPresetAddsFiltersToPipeline() throws {
+        guard let engine else { throw XCTSkip("No Metal device.") }
+        let pipeline = try MetalForgePipeline(engine: engine)
+        XCTAssertEqual(pipeline.filterCount, 0)
+
+        try pipeline.applyPreset(.vhs)
+        XCTAssertGreaterThan(
+            pipeline.filterCount, 0,
+            "applyPreset should append the preset's filters"
+        )
+    }
+
+    func testApplyPresetReplacesPreviousChain() throws {
+        guard let engine else { throw XCTSkip("No Metal device.") }
+        let pipeline = try MetalForgePipeline(engine: engine)
+
+        try pipeline.applyPreset(.vhs)
+        let vhsCount = pipeline.filterCount
+        XCTAssertEqual(vhsCount, try MetalForgeEffectPreset.vhs.makeFilters(engine: engine).count)
+
+        // Applying another preset should replace, not accumulate.
+        try pipeline.applyPreset(.noir)
+        XCTAssertEqual(
+            pipeline.filterCount,
+            try MetalForgeEffectPreset.noir.makeFilters(engine: engine).count
+        )
+    }
+
+    func testOriginalIsNotAPresetCase() {
+        // "Original" is the no-effect state and must not be modelled as a preset.
+        let rawValues = MetalForgeEffectPreset.allCases.map { $0.rawValue.lowercased() }
+        XCTAssertFalse(rawValues.contains("original"))
+
+        let displayNames = MetalForgeEffectPreset.allCases.map { $0.displayName.lowercased() }
+        XCTAssertFalse(displayNames.contains("original"))
+    }
+
+    /// Whether a preset's filter chain contains an instance of the given type.
+    private func preset(
+        _ preset: MetalForgeEffectPreset,
+        engine: MetalForgeEngine,
+        contains type: (any MetalForgeFilter.Type)
+    ) throws -> Bool {
+        try preset.makeFilters(engine: engine).contains { Swift.type(of: $0) == type }
+    }
+
+    func testVHSPresetUsesGPUStylizationFilter() throws {
+        guard let engine else { throw XCTSkip("No Metal device.") }
+        let hasScanline = try preset(.vhs, engine: engine, contains: ScanlineFilter.self)
+        let hasRGBSplit = try preset(.vhs, engine: engine, contains: RGBSplitFilter.self)
+        XCTAssertTrue(hasScanline || hasRGBSplit,
+                      "vhs should include ScanlineFilter or RGBSplitFilter")
+    }
+
+    func testDreamyPresetUsesGaussianBlur() throws {
+        guard let engine else { throw XCTSkip("No Metal device.") }
+        XCTAssertTrue(try preset(.dreamy, engine: engine, contains: GaussianBlurFilter.self))
+    }
+
+    func testHighContrastPresetUsesSharpen() throws {
+        guard let engine else { throw XCTSkip("No Metal device.") }
+        XCTAssertTrue(try preset(.highContrast, engine: engine, contains: SharpenFilter.self))
+    }
+
+    func testVintageFilmPresetUsesVignette() throws {
+        guard let engine else { throw XCTSkip("No Metal device.") }
+        XCTAssertTrue(try preset(.vintageFilm, engine: engine, contains: VignetteFilter.self))
+    }
+
+    func testCyberpunkPresetUsesGPUEffect() throws {
+        guard let engine else { throw XCTSkip("No Metal device.") }
+        let hasRGBSplit   = try preset(.cyberpunk, engine: engine, contains: RGBSplitFilter.self)
+        let hasNeonTrails = try preset(.cyberpunk, engine: engine, contains: NeonTrailsFilter.self)
+        XCTAssertTrue(hasRGBSplit || hasNeonTrails,
+                      "cyberpunk should include RGBSplitFilter or NeonTrailsFilter")
+    }
+
     func testColorSpaceDetectionRecognisesHLG() {
         var pb: CVPixelBuffer?
         let attrs: [CFString: Any] = [
