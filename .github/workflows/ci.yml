@@ -26,3 +26,26 @@ jobs:
 
       - name: Test
         run: swift test
+
+  build-example-app:
+    name: Build Example App (xcodebuild)
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app
+
+      - name: Build MetalForgeCamera example
+        # Build for a generic iOS device with signing disabled — CI has no
+        # provisioning profile, and we only need to verify the app compiles
+        # and links against the local MetalForge package.
+        run: |
+          xcodebuild \
+            -project Examples/MetalForgeCamera/MetalForgeCamera.xcodeproj \
+            -scheme MetalForgeCamera \
+            -destination 'generic/platform=iOS' \
+            CODE_SIGNING_ALLOWED=NO \
+            build

@@ -41,7 +41,8 @@ plumbing yourself.
 
 ## Demo
 
-> **Demo video coming soon.**
+> A demo video is not yet available. In the meantime, run the
+> [example camera app](#running-the-example-app) on a device to see MetalForge live.
 
 The bundled [`MetalForgeCamera`](Examples/MetalForgeCamera) example app shows the
 library running end to end on a device:
@@ -78,19 +79,25 @@ MetalForge is a building block rather than a finished app. It fits well when you
 
 ## Installation
 
-Add MetalForge as a Swift Package dependency. There is no tagged release yet, so
-track the `develop` branch for now (a tagged `v0.1.0` is coming soon):
+Add MetalForge as a Swift Package dependency:
 
 ```swift
 .package(
     url: "https://github.com/letbakty/MetalForge.git",
-    branch: "develop"
+    from: "0.1.0"
 )
 ```
 
 Then add `"MetalForge"` to your target's dependencies.
 
-For production use, prefer a tagged release once `v0.1.0` is published.
+> **Until `v0.1.0` is tagged**, track the `develop` branch instead:
+>
+> ```swift
+> .package(
+>     url: "https://github.com/letbakty/MetalForge.git",
+>     branch: "develop"
+> )
+> ```
 
 ---
 
@@ -134,14 +141,71 @@ capture → display → record reference implementation.
 
 ---
 
+## Effect Presets
+
+MetalForge includes ready-to-use effect presets assembled from the standard colour
+and analog filters **plus the GPU shader effects** (blur, sharpen, vignette,
+scanlines, RGB split) — no extra shaders required.
+
+Example:
+
+```swift
+let pipeline = try MetalForgePipeline(engine: engine)
+try pipeline.applyPreset(.vhs) // replaces current user filter chain
+```
+
+`applyPreset(_:)` **replaces the current user filter chain** (it clears existing
+filters before appending the preset's), so switching presets is a single call and
+never stacks effects.
+
+Available presets (`MetalForgeEffectPreset`):
+
+| Preset            | Look                                                                 | Key effects |
+|-------------------|----------------------------------------------------------------------|-------------|
+| `.cinematicWarm`  | Warm filmic grade with a soft vignette                               | ColorCorrection + Vignette |
+| `.cinematicCool`  | Cool, teal-leaning grade with a soft vignette                        | ColorCorrection + Vignette |
+| `.vhs`            | Retro tape/CRT: scanlines, RGB split, fringing, grain, tracking jitter | Scanline + RGBSplit + ChromaticAberration + HorizontalJitter + AnalogNoise |
+| `.noir`           | Desaturated, punchy, darkened, edge-crisped, vignetted               | ColorCorrection + Adjustment + Sharpen + Vignette |
+| `.cyberpunk`      | Saturated cool neon look with channel split and glowing trails        | ColorCorrection + Sharpen + RGBSplit + NeonTrails |
+| `.dreamy`         | Soft warm grade with gentle Gaussian + motion blur                    | ColorCorrection + GaussianBlur + MotionBlur |
+| `.highContrast`   | Crushed contrast, lifted saturation, crisp edges                      | ColorCorrection + Adjustment + Sharpen |
+| `.vintageFilm`    | Faded warm stock: vignette, faint scanlines, fine grain               | ColorCorrection + Vignette + Scanline + AnalogNoise |
+| `.neonTrails`     | Boosted grade, subtle channel split, glowing motion trails            | ColorCorrection + RGBSplit + NeonTrails |
+
+Every case exposes `displayName` and `description` for building UI, and
+`makeFilters(engine:)` if you want the raw filter array. The "Original" (no-effect)
+state is simply an empty chain — call `pipeline.removeAllFilters()` — and is
+deliberately **not** a preset case.
+
+---
+
+## GPU Effects
+
+MetalForge ships a pack of compute-shader effects. Each is a standalone
+`MetalForgeFilter` — construct it with the shared engine, tune its parameters, and
+append it to the pipeline:
+
+```swift
+// Gaussian blur — separable two-pass, reuses one intermediate texture per frame.
+let blur = try GaussianBlurFilter(engine: engine)
+blur.radius    = 8      // blur radius in pixels (clamped to 0...64)
+blur.intensity = 0.75   // blend original ↔ blurred (0...1)
+pipeline.append(blur)
+```
+
+The same pattern applies to `SharpenFilter`, `VignetteFilter`, `ScanlineFilter`, and
+`RGBSplitFilter`. All parameters have safe defaults and are clamped on the GPU, and
+every effect runs in both SDR (`.bgra8Unorm`) and HDR (`.rgba16Float`) working spaces.
+
+---
+
 ## Example App
 
 [`Examples/MetalForgeCamera`](Examples/MetalForgeCamera) is a minimal SwiftUI iOS app
 that runs a live camera feed through the filter chain. It demonstrates:
 
 - live camera preview backed by `AVCaptureSession`
-- real-time filter switching (Original / Warm / Cool / High Contrast)
-- a filter intensity slider
+- real-time preset switching (Original + the nine `MetalForgeEffectPreset` looks)
 - a before/after ("Show Original") toggle
 - SwiftUI integration via `MetalForgeViewRepresentable`
 - a local SwiftPM dependency on this package (relative `../..` path — no manual wiring)
@@ -154,6 +218,33 @@ open Examples/MetalForgeCamera/MetalForgeCamera.xcodeproj
 
 Run on a real iPhone — the iOS simulator has no camera. See the example's own
 [README](Examples/MetalForgeCamera/README.md) for permissions and details.
+
+### Running the Example App
+
+Open:
+
+```bash
+open Examples/MetalForgeCamera/MetalForgeCamera.xcodeproj
+```
+
+Run on a physical iPhone because the iOS simulator has no camera. The example
+includes:
+
+- live camera preview
+- an effect preset picker (Original + all nine presets)
+- a before/after ("Show Original") toggle
+- GPU shader effects (the presets are built from the standard + GPU filters)
+
+To verify it compiles from the command line (no device/signing needed):
+
+```bash
+xcodebuild \
+  -project Examples/MetalForgeCamera/MetalForgeCamera.xcodeproj \
+  -scheme MetalForgeCamera \
+  -destination 'generic/platform=iOS' \
+  CODE_SIGNING_ALLOWED=NO \
+  build
+```
 
 ---
 
@@ -170,6 +261,17 @@ input pixel format.
 **3D LUT grading**
 - `MetalForgeLUTFilter` — hardware trilinear interpolation with built-in presets
   (`.identity`, `.warm`, `.cool`, `.sepia`) and an adjustable `intensity`
+
+**Blur & sharpen**
+- `GaussianBlurFilter` — separable two-pass Gaussian (`radius`, `intensity`); reuses
+  a single intermediate texture across frames
+- `SharpenFilter` — unsharp-mask edge enhancement (`amount`)
+
+**Stylization**
+- `VignetteFilter` — radial edge darkening (`intensity`, `radius`, `softness`)
+- `ScanlineFilter` — CRT-style horizontal scanlines (`intensity`, `lineWidth`, `timeSeed`)
+- `RGBSplitFilter` — per-channel UV displacement (`redOffset`, `greenOffset`,
+  `blueOffset`, `intensity`)
 
 **Glitch effects**
 - `GlitchFilter` — `intensity`
@@ -248,13 +350,26 @@ A few choices worth calling out for anyone reading the source:
 
 ## Testing
 
+Build and test the Swift package:
+
 ```bash
 swift build
 swift test
 ```
 
-GitHub Actions runs both on every push and pull request targeting `main` and `develop`
-via [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
+Verify the example app compiles (no device or code signing required):
+
+```bash
+xcodebuild \
+  -project Examples/MetalForgeCamera/MetalForgeCamera.xcodeproj \
+  -scheme MetalForgeCamera \
+  -destination 'generic/platform=iOS' \
+  CODE_SIGNING_ALLOWED=NO \
+  build
+```
+
+GitHub Actions runs all three on every push and pull request targeting `main` and
+`develop` via [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
 
 ---
 
