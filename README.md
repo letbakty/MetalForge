@@ -20,7 +20,7 @@ Reach for MetalForge when you need a Metal compute filter chain wired into Apple
 capture and recording stack without writing the `CVPixelBuffer` ↔ `MTLTexture`
 plumbing yourself.
 
-> **Status:** early `0.1.x` development. APIs may change before `1.0`.
+> **Status:** early `0.2.x` development. APIs may change before `1.0`.
 
 ---
 
@@ -29,6 +29,7 @@ plumbing yourself.
 - **Real-time GPU video processing** with Metal compute shaders
 - **`CVPixelBuffer` → `MTLTexture` pipeline** backed by `CVMetalTextureCache`
 - **Composable filter chain** — append filters and process frame by frame
+- **80+ GPU filters** across colour, tone, blur, morphology, distortion, blend, edge-detection, artistic, analog, glitch, and temporal packs
 - **3D LUT color grading** with hardware trilinear interpolation and built-in presets
 - **SDR / HDR-oriented pipeline architecture** (BT.709 and BT.2100 PQ / HLG paths)
 - **SwiftUI / UIKit / AppKit preview** via `MetalForgeView` and representable wrappers
@@ -84,7 +85,7 @@ Add MetalForge as a Swift Package dependency:
 ```swift
 .package(
     url: "https://github.com/letbakty/MetalForge.git",
-    from: "0.1.0"
+    from: "0.2.0"
 )
 ```
 
@@ -249,6 +250,17 @@ input pixel format.
 - `ColorCorrectionFilter` — `exposure`, `contrast`, `saturation`, `temperatureShift`
 - `AdjustmentFilter` — `brightness`, `contrast`
 
+**Colour adjustment**
+- `GammaFilter`, `LevelsFilter`, `HueRotateFilter`, `VibranceFilter`,
+  `WhiteBalanceFilter`, `ToneCurveFilter`, `HighlightShadowFilter`,
+  `HighlightShadowTintFilter`, `ColorMatrixFilter`, `ColorInvertFilter`,
+  `MonochromeFilter`, `FalseColorFilter`
+
+**Tone**
+- `GrayscaleFilter`, `SepiaFilter`, `HazeFilter`, `SkinToneFilter`,
+  `LuminanceThresholdFilter`, `AdaptiveThresholdFilter`, `PosterizeFilter`,
+  `ColorHalftoneFilter`
+
 **3D LUT grading**
 - `MetalForgeLUTFilter` — hardware trilinear interpolation with built-in presets
   (`.identity`, `.warm`, `.cool`, `.sepia`) and an adjustable `intensity`
@@ -257,6 +269,31 @@ input pixel format.
 - `GaussianBlurFilter` — separable two-pass Gaussian (`radius`, `intensity`); reuses
   a single intermediate texture across frames
 - `SharpenFilter` — unsharp-mask edge enhancement (`amount`)
+- `BoxBlurFilter`, `DirectionalMotionBlurFilter`, `ZoomBlurFilter`, `TiltShiftFilter`,
+  `BilateralBlurFilter`, `MedianBlurFilter`, `LensBlurFilter`, `SurfaceBlurFilter`,
+  `IOSBlurFilter`
+
+**Morphology**
+- `DilationFilter`, `ErosionFilter`, `OpeningFilter`, `ClosingFilter`
+
+**Distortion**
+- `BulgeDistortionFilter`, `PinchDistortionFilter`, `StretchDistortionFilter`,
+  `SwirlFilter`, `SphereRefractionFilter`, `GlassSphereFilter`, `CropFilter`,
+  `TransformFilter`
+
+**Edge detection**
+- `SobelEdgeDetectionFilter`, `PrewittEdgeDetectionFilter`, `Convolution3x3Filter`,
+  `EmbossFilter`, `LaplacianFilter`, `CannyEdgeDetectionFilter`,
+  `HarrisCornerDetectionFilter`, `NonMaximumSuppressionFilter`
+
+**Artistic & halftone**
+- `ToonFilter`, `SmoothToonFilter`, `SketchFilter`, `ThresholdSketchFilter`,
+  `CrosshatchFilter`, `HalftoneFilter`, `PolkaDotFilter`, `KuwaharaFilter`,
+  `PixellateFilter`, `PolarPixellateFilter`, `MosaicFilter`, `CGAColorspaceFilter`
+
+**Blend (require a second input texture)**
+- `BlendModeFilter` (19 Photoshop-style modes), `AlphaBlendFilter`, `ChromaKeyFilter`,
+  `MaskBlendFilter`
 
 **Stylization**
 - `VignetteFilter` — radial edge darkening (`intensity`, `radius`, `softness`)
@@ -275,6 +312,9 @@ input pixel format.
 **Temporal effects**
 - `MotionBlurFilter` — `accumulationAlpha`
 - `NeonTrailsFilter` — `intensity`, `decay`, `neonColor`
+- `FrameBlendFilter`, `LowPassFilter`, `HighPassFilter`, `MotionDetectorFilter`,
+  `OpticalFlowWarpFilter`, `FrameInterpolationFilter` — history-buffer effects that
+  respond to motion between frames
 
 **YUV ↔ RGB conversion** *(automatic stages)*
 - `YUVToRGBConverter` — wraps bi-planar camera YUV into RGB working space
@@ -378,7 +418,7 @@ Benchmarks are planned for `v0.2.0`. The benchmark runner will measure:
 
 ## Current Status
 
-MetalForge is currently in early `0.1.x` development. The core engine, filter chain,
+MetalForge is currently in early `0.2.x` development. The core engine, filter chain,
 preview components, and recording path are covered by build and unit tests, but APIs
 may change before the `1.0` release.
 
@@ -388,8 +428,8 @@ may change before the `1.0` release.
 
 Honest about where the project is today:
 
-- The API is early `0.1.x` and may change before `1.0`.
-- Benchmarks are not published yet — performance numbers will come with the `v0.2.0`
+- The API is early `0.2.x` and may change before `1.0`.
+- Benchmarks are not published yet — performance numbers will come with a future
   benchmark runner.
 - The example app focuses on live preview and filtering.
 - A physical iPhone is required for camera preview (the iOS simulator has no camera).
@@ -401,6 +441,7 @@ Honest about where the project is today:
 ## Roadmap
 
 - `v0.1.0` initial public release (tagged)
+- `v0.2.0` seven new filter packs — 90+ GPU filters (tagged)
 - More pixel-accuracy tests
 - A benchmark runner with real measurements
 - Example app screenshots / videos

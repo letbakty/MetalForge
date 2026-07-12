@@ -45,6 +45,26 @@ A file-by-file guide to the repository, grouped by area. See
   two-pass), `SharpenFilter`.
 - `Sources/MetalForge/StylizationFilters.swift` — `VignetteFilter`,
   `ScanlineFilter`, `RGBSplitFilter`.
+- `Sources/MetalForge/ColorAdjustmentFilters.swift` — gamma, levels, hue rotate,
+  vibrance, white balance, tone curve, highlight/shadow (+ tint), colour matrix,
+  invert, monochrome, false colour.
+- `Sources/MetalForge/ToneFilters.swift` — grayscale, sepia, haze, skin tone,
+  luminance/adaptive threshold, posterize, colour halftone.
+- `Sources/MetalForge/BlurMorphologyFilters.swift` — box / directional-motion /
+  zoom / tilt-shift / bilateral / median / lens / surface / iOS blurs and
+  dilation / erosion / opening / closing morphology.
+- `Sources/MetalForge/DistortionFilters.swift` — bulge, pinch, stretch, swirl,
+  sphere / glass refraction, transform, crop.
+- `Sources/MetalForge/EdgeDetectionFilters.swift` — Sobel, Prewitt, Laplacian,
+  Canny, Harris corners, non-max suppression, 3x3 convolution / emboss.
+- `Sources/MetalForge/ArtisticFilters.swift` — toon, smooth toon, sketch,
+  threshold sketch, crosshatch, halftone, polka dot, Kuwahara, pixellate, polar
+  pixellate, mosaic, CGA colourspace.
+- `Sources/MetalForge/BlendFilters.swift` — `BlendModeFilter` (19 modes),
+  `AlphaBlendFilter`, `ChromaKeyFilter`, `MaskBlendFilter` (all take a second
+  input texture).
+- `Sources/MetalForge/TemporalPackFilters.swift` — frame blend, low / high pass,
+  motion detector, optical-flow warp, frame interpolation over a history buffer.
 
 ## Effect presets
 
@@ -71,6 +91,14 @@ compiled at runtime under SwiftPM):
 - `TemporalKernels.metal` — motion blur, neon trails.
 - `BlurKernels.metal` — separable Gaussian blur passes and sharpen.
 - `StylizationKernels.metal` — vignette, scanlines, RGB split.
+- `ColorAdjustmentKernels.metal` — colour-adjustment pack kernels.
+- `ToneKernels.metal` — tone pack kernels.
+- `BlurMorphologyKernels.metal` — extended blur and morphology kernels.
+- `DistortionKernels.metal` — geometric distortion kernels.
+- `EdgeKernels.metal` — edge-detection and convolution kernels.
+- `ArtisticKernels.metal` — artistic and halftone kernels.
+- `BlendKernels.metal` — blend-mode, alpha, chroma-key, and mask kernels.
+- `TemporalPackKernels.metal` — temporal history-buffer kernels.
 
 ## Capture
 
@@ -100,6 +128,13 @@ compiled at runtime under SwiftPM):
   GPU pixel-behavior tests.
 - `Tests/MetalForgeTests/MetalForgePixelTestHelpers.swift` — helpers for
   pixel-behavior tests: known-data textures, GPU readback, tolerance compares.
+- `Tests/MetalForgeTests/ColorPackTests.swift` — colour & tone pack tests.
+- `Tests/MetalForgeTests/DistortionPackTests.swift` — distortion pack tests.
+- `Tests/MetalForgeTests/BlendPackTests.swift` — blend-mode pack tests.
+- `Tests/MetalForgeTests/EdgePackTests.swift` — edge-detection pack tests.
+- `Tests/MetalForgeTests/ArtisticPackTests.swift` — artistic pack tests.
+- `Tests/MetalForgeTests/BlurMorphologyPackTests.swift` — blur & morphology pack tests.
+- `Tests/MetalForgeTests/TemporalPackTests.swift` — temporal pack tests.
 
 ## Example app
 
