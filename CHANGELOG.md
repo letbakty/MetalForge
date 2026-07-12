@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.2.0] - 2026-07-12
 
 ### Added
 - Colour & tone filter pack: gamma, levels, hue rotate, vibrance, white balance,

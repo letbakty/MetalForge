@@ -20,7 +20,7 @@ Reach for MetalForge when you need a Metal compute filter chain wired into Apple
 capture and recording stack without writing the `CVPixelBuffer` ↔ `MTLTexture`
 plumbing yourself.
 
-> **Status:** early `0.1.x` development. APIs may change before `1.0`.
+> **Status:** early `0.2.x` development. APIs may change before `1.0`.
 
 ---
 
@@ -85,7 +85,7 @@ Add MetalForge as a Swift Package dependency:
 ```swift
 .package(
     url: "https://github.com/letbakty/MetalForge.git",
-    from: "0.1.0"
+    from: "0.2.0"
 )
 ```
 
@@ -418,7 +418,7 @@ Benchmarks are planned for `v0.2.0`. The benchmark runner will measure:
 
 ## Current Status
 
-MetalForge is currently in early `0.1.x` development. The core engine, filter chain,
+MetalForge is currently in early `0.2.x` development. The core engine, filter chain,
 preview components, and recording path are covered by build and unit tests, but APIs
 may change before the `1.0` release.
 
@@ -428,8 +428,8 @@ may change before the `1.0` release.
 
 Honest about where the project is today:
 
-- The API is early `0.1.x` and may change before `1.0`.
-- Benchmarks are not published yet — performance numbers will come with the `v0.2.0`
+- The API is early `0.2.x` and may change before `1.0`.
+- Benchmarks are not published yet — performance numbers will come with a future
   benchmark runner.
 - The example app focuses on live preview and filtering.
 - A physical iPhone is required for camera preview (the iOS simulator has no camera).
@@ -441,6 +441,7 @@ Honest about where the project is today:
 ## Roadmap
 
 - `v0.1.0` initial public release (tagged)
+- `v0.2.0` seven new filter packs — 90+ GPU filters (tagged)
 - More pixel-accuracy tests
 - A benchmark runner with real measurements
 - Example app screenshots / videos
